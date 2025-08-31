@@ -1,0 +1,145 @@
+pip install -r requirements.txt
+brew install ffmpeg
+ffmpeg -version
+which ffmpeg     # debería mostrar /opt/homebrew/bin/ffmpeg o /usr/local/bin/ffmpeg
+import io
+import os
+import tempfile
+import streamlit as st
+
+from gtts import gTTS
+from pypdf import PdfReader
+from docx import Document
+from pydub import AudioSegment
+
+# -----------------------------
+# Configuración de la app
+# -----------------------------
+st.set_page_config(page_title="Texto → Audio", page_icon="🔊", layout="centered")
+st.title("🔊 Texto → Audio (Multi-idioma, textos largos)")
+st.caption("Convierte texto o archivos (.txt, .pdf, .docx) en audio MP3. Compatible con iOS, Android, 
+Huawei y navegadores web.")
+
+# -----------------------------
+# Opciones de idioma
+# -----------------------------
+LANG_OPTS = {
+    "Español": "es",
+    "Inglés": "en",
+    "Francés": "fr",
+    "Italiano": "it",
+    "Portugués": "pt",
+    "Ruso": "ru",
+    "Chino (Mandarín)": "zh-CN",
+    "Coreano": "ko",
+}
+
+SAFE_CHUNK = 9000          # tamaño de cada fragmento
+HARD_MAX_CHARS = 200000    # límite total de caracteres
+
+# -----------------------------
+# Funciones auxiliares
+# -----------------------------
+def extract_text_from_pdf(file) -> str:
+    reader = PdfReader(file)
+    parts = []
+    for page in reader.pages:
+        try:
+            parts.append(page.extract_text() or "")
+        except Exception:
+            pass
+    return "\n".join(parts).strip()
+
+def extract_text_from_docx(file) -> str:
+    doc = Document(file)
+    return "\n".join(p.text for p in doc.paragraphs).strip()
+
+def clean_text(text: str) -> str:
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    lines = [ln.strip() for ln in text.split("\n")]
+    return "\n".join([ln for ln in lines if ln]).strip()
+
+def chunk_text(text, size=SAFE_CHUNK):
+    return [text[i:i+size] for i in range(0, len(text), size)]
+
+def synthesize_long_text_to_mp3(text, lang_code, slow=False) -> bytes:
+    """Genera un MP3 unificado a partir de texto largo (trozos + unión con pydub)."""
+    if len(text) > HARD_MAX_CHARS:
+        text = text[:HARD_MAX_CHARS]
+
+    chunks = chunk_text(text, SAFE_CHUNK)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        parts = []
+        for idx, ch in enumerate(chunks, start=1):
+            tts = gTTS(text=ch, lang=lang_code, slow=slow)
+            part_path = os.path.join(tmpdir, f"part_{idx:04d}.mp3")
+            tts.save(part_path)
+            parts.append(part_path)
+            st.write(f"✔️ Fragmento {idx}/{len(chunks)} generado")
+
+        combined = AudioSegment.silent(duration=0)
+        for p in parts:
+            combined += AudioSegment.from_mp3(p)
+
+        out = io.BytesIO()
+        combined.export(out, format="mp3", bitrate="192k")
+        out.seek(0)
+        return out.read()
+
+# -----------------------------
+# Interfaz Streamlit
+# -----------------------------
+uploaded = st.file_uploader("📂 Sube un archivo (.txt, .pdf, .docx)", type=["txt", "pdf", "docx"])
+
+text_default = ""
+if uploaded:
+    try:
+        suffix = uploaded.name.split(".")[-1].lower()
+        if suffix == "pdf":
+            text_default = extract_text_from_pdf(uploaded)
+        elif suffix == "docx":
+            text_default = extract_text_from_docx(uploaded)
+        else:
+            text_default = uploaded.read().decode("utf-8", errors="ignore")
+    except Exception as e:
+        st.error(f"No se pudo leer el archivo: {e}")
+
+text_input = st.text_area("✍️ Texto a convertir", value=text_default, height=220, placeholder="Pega aquí 
+tu texto…")
+
+col1, col2 = st.columns([2,1])
+with col1:
+    lang_name = st.selectbox("Idioma", list(LANG_OPTS.keys()), index=0)
+with col2:
+    slow = st.toggle("Voz lenta", value=False)
+
+if len(text_input) > HARD_MAX_CHARS:
+    st.warning(f"⚠️ El texto supera {HARD_MAX_CHARS} caracteres. Se recortará automáticamente.")
+
+if st.button("🎧 Generar audio MP3", type="primary", use_container_width=True):
+    text_input = clean_text(text_input or "")
+    if not text_input:
+        st.error("Por favor ingresa o sube texto.")
+    else:
+        try:
+            code = LANG_OPTS[lang_name]
+            out_bytes = synthesize_long_text_to_mp3(text_input, code, slow=slow)
+
+            st.success("✅ ¡Audio generado!")
+            st.audio(out_bytes, format="audio/mp3")
+            st.download_button(
+                label="⬇️ Descargar MP3",
+                data=out_bytes,
+                file_name="audio_tts.mp3",
+                mime="audio/mpeg",
+                use_container_width=True
+            )
+        except Exception as e:
+            st.error(f"Ocurrió un error: {e}")
+
+
+streamlit==1.36.0
+gTTS==2.5.1
+pypdf==4.2.0
+python-docx==1.1.2
