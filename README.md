@@ -30,3 +30,4 @@ Se abrirá en tu navegador (generalmente http://localhost:8501).
 ## Notas
 - Si el PDF es escaneado (solo imagen), primero aplica OCR.
 - El MP3 funciona en iOS, Android, Huawei y navegadores web.
+# texto-audio-app
