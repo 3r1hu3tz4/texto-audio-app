@@ -6,9 +6,11 @@ from pypdf import PdfReader
 from docx import Document
 from pydub import AudioSegment
 from pydub.utils import which
-# Asegurar que pydub encuentre ffmpeg y ffprobe
 AudioSegment.converter = which("ffmpeg")
-AudioSegment.ffprobe = which("ffprobe")
+AudioSegment.ffprobe  = which("ffprobe")
+import sys
+st.caption(f"Python runtime: {sys.version}")
+
 
 # =========================
 # PRESENCIA / USUARIOS ACTIVOS (LOCAL)
